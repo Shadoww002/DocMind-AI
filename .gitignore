@@ -1,0 +1,46 @@
+# =========================
+# PYTHON & ENVIRONMENTS
+# =========================
+venv/
+env/
+.env
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# =========================
+# DATABASES & VECTOR STORAGE
+# =========================
+# Do NOT push ChromaDB to GitHub! It gets massive and contains user data.
+data/
+data/chroma_db/
+*.sqlite3
+
+# =========================
+# AI MODELS & CACHES
+# =========================
+# Ignore local Hugging Face caches and PyTorch weights
+.cache/
+huggingface/
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.onnx
+
+# =========================
+# USER UPLOADS
+# =========================
+# Ignore any PDFs you uploaded while testing
+*.pdf
+uploads/
+test_docs/
+
+# =========================
+# OS & IDE FILES
+# =========================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
