@@ -27,3 +27,4 @@ chromadb>=0.4.24
 torch>=2.2.0
 transformers>=4.38.0
 sentence-transformers>=2.5.0
+ sentencepiece>=0.2.1

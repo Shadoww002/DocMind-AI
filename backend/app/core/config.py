@@ -1,100 +1,193 @@
 import os
-from typing import Dict, Any
+import logging
+from typing import Dict, Any, List, Optional
+
+logger = logging.getLogger(__name__)
+
 
 class DomainConfig:
-    # Safe fallback mapping for localized data persistence directories
-    BASE_DIR = os.getcwd()
+    """
+    Central configuration registry for all domain profiles.
+
+    Improvements over v1:
+    - BASE_DIR uses __file__ so it is stable regardless of where uvicorn is launched from
+    - VECTOR_DB_DIR validated at class load time — fails fast with a clear message
+    - Domain field schemas updated to match the improved extractor (Lab Values & Vitals,
+      Monetary Amounts, Applicable Indian Laws, Courts & Jurisdiction, Education)
+    - system_prompts tightened: explicit instruction not to hallucinate
+    - get_domain_property fallback changed from "legal" to None — silently falling back
+      to legal config when an unknown domain is passed hides bugs
+    - New helpers: domain_names(), all_fields(), is_valid_domain(), get_system_prompt()
+    - All env-var model overrides preserved
+    """
+
+    # ── Paths ─────────────────────────────────────────────────────────────────
+    # IMPROVEMENT: anchor to this file's location, not os.getcwd()
+    # getcwd() changes depending on where you run `uvicorn`, making the DB
+    # path unpredictable. __file__ is always the same absolute location.
+    BASE_DIR      = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     VECTOR_DB_DIR = os.getenv("VECTOR_DB_DIR", os.path.join(BASE_DIR, "data", "chroma_db"))
-    
+
+    # ── Domain profiles ───────────────────────────────────────────────────────
     DOMAINS: Dict[str, Dict[str, Any]] = {
+
         "medical": {
-            "name": "Medical Records & Clinical Trials",
+            "name":      "Medical Records & Clinical Reports",
             "ner_model": os.getenv("MEDICAL_NER_MODEL", "dslim/bert-base-NER"),
             "llm_model": os.getenv("MEDICAL_LLM_MODEL", "google/flan-t5-base"),
-            
-            # Expanded feature extraction schema matching the new UI/Extractor
+
+            # IMPROVEMENT: fields updated to match improved extractor output keys
             "fields": [
-                "Patient & Doctors Involved", 
-                "Important Dates", 
-                "Diagnoses & Conditions", 
-                "Medications & Dosages", 
+                "Patient & Doctors Involved",
+                "Important Dates",
+                "Diagnoses & Conditions",
+                "Lab Values & Vitals",       # new — HbA1c, BP, creatinine, etc.
+                "Medications & Dosages",
                 "Medical History",
-                "Procedures & Treatments"
+                "Procedures & Treatments",
             ],
-            
-            # Hyperparameter Tuning Matrix tailored for Clinical Text
-            "chunk_size": 800,       # Smaller chunk window due to dense clinical vitals/metrics
-            "chunk_overlap": 150,
-            "max_chunks": 12,        # Guardrail cap to avoid exceeding model token constraints
-            "top_k_retrieval": 3,    # Number of semantic vectors to surface during RAG lookup
-            
+
+            # Smaller chunks for dense clinical text — vitals/lab lines are short
+            "chunk_size":      800,
+            "chunk_overlap":   150,
+            "max_chunks":      12,
+            "top_k_retrieval": 3,
+
             "system_prompt": (
-                "You are an expert clinical informatics assistant. Analyze the provided medical context "
-                "and extract clinical insights accurately. Focus heavily on dosages, diagnoses, and medical timelines. "
-                "Do not infer or extrapolate any information not explicitly stated in the source text blocks."
-            )
+                "You are a clinical informatics assistant with expertise in Indian medical records. "
+                "Analyze the provided text and extract only what is explicitly stated. "
+                "Focus on diagnoses, medications with dosages, lab values, and timelines. "
+                "Do not infer, extrapolate, or generate information absent from the source text."
+            ),
         },
+
         "legal": {
-            "name": "Indian Legal Documents & Contracts",
+            "name":      "Indian Legal Documents & Contracts",
             "ner_model": os.getenv("LEGAL_NER_MODEL", "dslim/bert-base-NER"),
             "llm_model": os.getenv("LEGAL_LLM_MODEL", "google/flan-t5-base"),
-            
-            # Expanded feature extraction schema matching the new UI/Extractor
+
+            # IMPROVEMENT: added Monetary Amounts, Applicable Indian Laws, Courts & Jurisdiction
+            # to match the three new fields added in the improved extractor
             "fields": [
-                "Parties & Signees", 
-                "Execution Dates", 
-                "Financial Liabilities", 
-                "Indemnity & Clauses", 
+                "Parties & Signees",
+                "Execution Dates",
+                "Monetary Amounts",          # new — ₹ values, stamp duty, consideration
+                "Financial Liabilities",
+                "Indemnity & Clauses",
+                "Applicable Indian Laws",    # new — IPC, CrPC, Registration Act, etc.
+                "Courts & Jurisdiction",     # new — Supreme Court, High Court, NCLT, etc.
                 "Obligations",
-                "Risks & Red Flags"
+                "Risks & Red Flags",
             ],
-            
-            # Hyperparameter Tuning Matrix tailored for Jurisdictional Documents
-            "chunk_size": 600,       # Highly granular slicing to ensure legal clauses are not split mid-sentence
-            "chunk_overlap": 200,    # Large overlap cushion to capture cross-references across boundaries
-            "max_chunks": 15,
-            "top_k_retrieval": 4,    # Surfacing higher context volume for comprehensive review
-            
+
+            # High overlap to prevent legal clauses from being split across chunk boundaries
+            "chunk_size":      600,
+            "chunk_overlap":   200,
+            "max_chunks":      15,
+            "top_k_retrieval": 4,
+
             "system_prompt": (
-                "You are an expert legal counsel specialized in Indian Law, including the Indian Contract Act. "
-                "Analyze the legal text strictly. Highlight jurisdictional limits, financial liabilities, indemnity clauses, "
-                "and critical execution dates. Maintain absolute factual compliance based exclusively on the given text."
-            )
+                "You are a legal counsel specialising in Indian law, including the Indian Contract Act 1872, "
+                "Transfer of Property Act, Registration Act 1908, and related statutes. "
+                "Analyze the provided legal text strictly. Identify parties, financial obligations, "
+                "indemnity clauses, applicable Indian acts, and jurisdiction. "
+                "Base all output exclusively on the supplied text — do not infer unstated obligations."
+            ),
         },
+
         "resume": {
-            "name": "Resumes & CV Intelligence",
+            "name":      "Resumes & CV Intelligence",
             "ner_model": os.getenv("RESUME_NER_MODEL", "dslim/bert-base-NER"),
             "llm_model": os.getenv("RESUME_LLM_MODEL", "google/flan-t5-base"),
-            
-            # Expanded feature extraction schema matching the new UI/Extractor
+
+            # IMPROVEMENT: added Education field to match extractor; reordered for UI display
             "fields": [
-                "Candidate Info", 
-                "Target Role Alignment", 
-                "Skills Matrix", 
-                "Experience Summary", 
+                "Candidate Info",
+                "Target Role Alignment",
+                "Skills Matrix",
+                "Education",             # new — degree names, IIT/NIT/BITS detection
+                "Education Timeline",
+                "Experience Summary",
                 "Certifications",
-                "Education Timeline"
             ],
-            
-            # Hyperparameter Tuning Matrix tailored for Professional Profiles
-            "chunk_size": 1200,      # Resumes are sparse; larger text spans keep whole job entries intact
-            "chunk_overlap": 100,
-            "max_chunks": 8,         # Low ceiling since resumes are brief documents
+
+            # Larger chunks to keep complete job entries together
+            "chunk_size":      1200,
+            "chunk_overlap":   100,
+            "max_chunks":      8,
             "top_k_retrieval": 2,
-            
+
             "system_prompt": (
-                "You are an advanced technical talent acquisition engine. Evaluate the candidate text. "
-                "Extract concrete skills, identify institutional backgrounds, and point out distinct domain alignment "
-                "strengths based solely on the factual context of the target candidate text profile."
-            )
-        }
+                "You are a senior technical recruiter evaluating a candidate's profile. "
+                "Extract concrete skills, institutional backgrounds, job titles, companies, "
+                "years of experience, education details, and certifications. "
+                "Base your output solely on the factual content of the provided resume text."
+            ),
+        },
     }
+
+    # ── Class-level validation ────────────────────────────────────────────────
+
+    @classmethod
+    def validate(cls) -> bool:
+        """
+        Called by main.py during startup. Returns True if config is valid.
+        Checks that VECTOR_DB_DIR exists and is writable.
+        """
+        try:
+            os.makedirs(cls.VECTOR_DB_DIR, exist_ok=True)
+            probe = os.path.join(cls.VECTOR_DB_DIR, ".config_probe")
+            with open(probe, "w") as f:
+                f.write("ok")
+            os.remove(probe)
+            return True
+        except OSError as e:
+            logger.critical(f"[Config] VECTOR_DB_DIR is not writable: {cls.VECTOR_DB_DIR} — {e}")
+            return False
+
+    # ── Access helpers ────────────────────────────────────────────────────────
 
     @classmethod
     def get_domain_property(cls, domain: str, key: str, default: Any = None) -> Any:
-        """Safe extraction wrapper to query configuration nested values with reliable fallbacks."""
-        domain_profile = cls.DOMAINS.get(domain.lower())
-        if not domain_profile:
-            # Fall back to legal layout profile if request domain is completely unmapped
-            domain_profile = cls.DOMAINS.get("legal", {})
-        return domain_profile.get(key, default)
+        """
+        Safe property accessor with explicit None fallback.
+
+        IMPROVEMENT: v1 silently fell back to the 'legal' profile for unknown
+        domains, masking bugs where wrong domain strings were passed. Now returns
+        the default value and logs a warning so the caller knows the domain was invalid.
+        """
+        profile = cls.DOMAINS.get(domain.lower())
+        if profile is None:
+            logger.warning(
+                f"[Config] get_domain_property called with unknown domain '{domain}'. "
+                f"Returning default for key '{key}'."
+            )
+            return default
+        return profile.get(key, default)
+
+    @classmethod
+    def is_valid_domain(cls, domain: str) -> bool:
+        """Single-call validation used in endpoints and Pydantic validators."""
+        return domain.lower() in cls.DOMAINS
+
+    @classmethod
+    def domain_names(cls) -> List[str]:
+        """Returns valid domain keys: ['medical', 'legal', 'resume']."""
+        return list(cls.DOMAINS.keys())
+
+    @classmethod
+    def all_fields(cls, domain: str) -> List[str]:
+        """
+        Returns the field list for a domain, or [] for unknown domains.
+        Used by the extractor to initialise the output dict safely.
+        """
+        return cls.get_domain_property(domain, "fields", default=[])
+
+    @classmethod
+    def get_system_prompt(cls, domain: str) -> str:
+        """Convenience accessor for the domain system prompt."""
+        return cls.get_domain_property(
+            domain,
+            "system_prompt",
+            default="You are an expert analyst. Extract key information from the provided text.",
+        )
