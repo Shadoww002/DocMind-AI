@@ -207,7 +207,7 @@ class DomainSummarizer:
         start = time.time()
         params = params or {}
 
-        profile = DomainConfig.DOMAINS.get(domain, DomainConfig.DOMAINS.get("legal", {}))
+        profile = DomainConfig.DOMAINS.get(domain) or {}
         domain_label = profile.get("name", domain.capitalize())
 
         # IMPROVEMENT 8: Use per-domain prompt templates, not a generic one.
