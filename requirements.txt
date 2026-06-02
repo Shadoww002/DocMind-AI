@@ -1,30 +1,28 @@
-fastapi==0.110.0
-uvicorn==0.28.0
-PyPDF2==3.0.1
-chromadb==0.4.24
-sentence-transformers==2.5.1
-transformers==4.38.2
-torch==2.2.1
-streamlit==1.32.2
-requests==2.31.0
-pydantic==2.6.4
-python-multipart==0.0.29
-pypdf==4.1.0
+# ── Web framework ─────────────────────────────────────────────────────────────
+fastapi==0.111.*
+uvicorn[standard]==0.30.*
+python-multipart==0.0.*        # required for FastAPI Form() and File() uploads
+pydantic==2.*
 
-# Base Backend Framework
-fastapi>=0.110.0
-uvicorn>=0.28.0
-pydantic>=2.6.0
-python-multipart>=0.0.9
+# ── PDF parsing ───────────────────────────────────────────────────────────────
+pypdf==4.*
 
-# High-Performance PDF Parsing
-pypdf>=4.1.0
+# ── ML / NLP ──────────────────────────────────────────────────────────────────
+torch==2.3.*                   # CPU build is fine; ~750MB but needed by all models
+transformers==4.41.*
+sentence-transformers==3.*     # all-MiniLM-L6-v2 embedding model
+tokenizers==0.19.*             # pulled in by transformers but pin to avoid mismatch
 
-# Vector Database Tier
-chromadb>=0.4.24
+# ── Vector database ───────────────────────────────────────────────────────────
+chromadb==0.5.*
 
-# AI, Deep Learning & Transformer Pipelines
-torch>=2.2.0
-transformers>=4.38.0
-sentence-transformers>=2.5.0
- sentencepiece>=0.2.1
+# ── Frontend ──────────────────────────────────────────────────────────────────
+streamlit==1.35.*
+requests==2.32.*               # Streamlit uses this to call FastAPI
+
+# ── Environment ───────────────────────────────────────────────────────────────
+python-dotenv==1.0.*           # loads .env file into os.environ
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+pytest==8.*
+pytest-asyncio==0.23.*         # for any async test functions
