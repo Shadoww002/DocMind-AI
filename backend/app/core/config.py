@@ -107,8 +107,8 @@ class DomainConfig:
                 "Skills Matrix",
                 "Education",             # new — degree names, IIT/NIT/BITS detection
                 "Education Timeline",
-                "Experience Summary",
                 "Certifications",
+                "Experience Summary",
             ],
 
             # Larger chunks to keep complete job entries together
