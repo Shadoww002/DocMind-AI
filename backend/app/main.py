@@ -198,16 +198,24 @@ def root_redirect():
 @app.get("/health", tags=["Health"])
 def health_check():
     """
-    IMPROVEMENT: dedicated /health route with richer info.
-    Streamlit (or any monitoring tool) can poll this to confirm the
-    backend is alive before submitting a document.
+    Dedicated health route with storage and collection stats.
+    Streamlit polls this before submitting a document.
     """
+    from backend.app.api.endpoints import _vdb_manager
     storage_accessible = os.path.isdir(DomainConfig.VECTOR_DB_DIR)
+
+    # FIX 5: wire collection_stats() so /health shows per-domain chunk counts
+    try:
+        collection_counts = _vdb_manager.collection_stats()
+    except Exception:
+        collection_counts = {}
+
     return {
         "status": "healthy" if storage_accessible else "degraded",
         "version": app.version,
         "domains": list(DomainConfig.DOMAINS.keys()),
         "storage_path": DomainConfig.VECTOR_DB_DIR,
         "storage_accessible": storage_accessible,
+        "collection_stats": collection_counts,
         "env": os.getenv("ENV", "development"),
     }
