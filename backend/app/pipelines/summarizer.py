@@ -1,6 +1,10 @@
 import logging
 import hashlib
+from pydoc import text
 import time
+from click import prompt
+from fastapi import params
+from fastapi import params
 import torch
 from functools import lru_cache
 from typing import Dict, List, Any, Optional
@@ -126,16 +130,21 @@ class DomainSummarizer:
             # IMPROVEMENT 5: Use torch_dtype=torch.float32 explicitly on CPU.
             # Avoids the half-precision fallback crash on CPU-only machines.
             dtype = torch.float16 if self.device_name in ("cuda", "mps") else torch.float32
-
+            # IMPROVEMENT: detect task type from model name
+            if any(x in self.model_name.lower() for x in ["bart", "pegasus", "distilbart"]):
+                task = "summarization"
+            else:
+                task = "text2text-generation"
+            self.task = task
             self.summarizer = pipeline(
-                "text2text-generation",
+                task,
                 model=self.model_name,
                 tokenizer=self.tokenizer,
                 device=self.device,
                 framework="pt",
                 torch_dtype=dtype,
             )
-            logger.info(f"[Summarizer] Model loaded: {self.model_name}")
+            logger.info(f"[Summarizer] Model loaded: {self.model_name} | Task: {task}")
         except Exception as e:
             logger.error(f"[Summarizer] Model load failed: {e}")
             raise
@@ -158,15 +167,26 @@ class DomainSummarizer:
             return self._cache[key]
 
         try:
-            result = self.summarizer(
-                prompt,
-                max_new_tokens=max_new_tokens,
-                min_length=min_length,
-                do_sample=False,        # deterministic output
-                truncation=True,
-                no_repeat_ngram_size=3, # IMPROVEMENT 6: reduces repetitive output
+            if self.task == "summarization":
+                result = self.summarizer(
+                    prompt,
+                    max_length=max_new_tokens,
+                    min_length=min_length,
+                    do_sample=False,
+                    truncation=True,
+                )
+
+                text = result[0]["summary_text"].strip()
+            else:
+                result = self.summarizer(
+                    prompt,
+                    max_new_tokens=max_new_tokens,
+                    min_length=min_length,
+                    do_sample=False,
+                    truncation=True,
+                    no_repeat_ngram_size=3,
             )
-            text = result[0]["generated_text"].strip()
+                text = result[0]["generated_text"].strip()
             if text:
                 self._cache[key] = text
             return text
@@ -196,8 +216,11 @@ class DomainSummarizer:
         chunks: List[str],
         domain: str,
         params: Dict[str, Any] = None,
-        max_chunks: int = 15,
+        max_chunks: int = None,
     ) -> Dict[str, Any]:
+
+        if max_chunks is None:
+            max_chunks = DomainConfig.get_domain_property(domain, "max_chunks", 20)
         """
         Map-Reduce summarization pipeline.
 
@@ -207,6 +230,46 @@ class DomainSummarizer:
         start = time.time()
         params = params or {}
 
+        # Resume domain: use direct summarization instead of map-reduce
+        if domain == "resume":
+            valid_chunks = [
+                c for c in chunks
+                if len(c.split()) >= 15
+            ]
+            if valid_chunks:
+                return self._summarize_resume_direct(valid_chunks, params)
+            else:
+                return self._empty_result("Resumes & CV Intelligence")
+        # Legal short documents: if fewer than 5 chunks, use direct summarization
+        if domain == "legal" and len([c for c in chunks if len(c.split()) >= 15]) < 5:
+            valid_chunks = [c for c in chunks if len(c.split()) >= 15]
+            if valid_chunks:
+                full_text = " ".join(valid_chunks)
+                safe_text = self._truncate_to_tokens(full_text, max_tokens=450)
+            prompt = (
+            "You are an Indian legal expert. Read this legal document and write "
+            "a precise 2-3 sentence summary covering: parties involved, type of "
+            "agreement, key obligations, monetary amounts, and duration.\n\n"
+            f"Document:\n{safe_text}\n\nLegal Summary:"
+            )
+            result = self._infer(prompt, max_new_tokens=180, min_length=40)
+            if not result or self._is_looping(result):
+                result = valid_chunks[0][:300]
+            detailed = "\n\n".join(
+                f"• {c.strip().capitalize()}"
+                for c in valid_chunks
+            )
+            return {
+                "domain_label": "Indian Legal Documents & Contracts",
+                "short_summary": result,
+                "detailed_summary": detailed,
+                "meta": {
+                    "chunks_processed": len(valid_chunks),
+                    "model": self.model_name,
+                    "device": self.device_name,
+                    "method": "direct",
+                },
+            }
         profile = DomainConfig.DOMAINS.get(domain) or {}
         domain_label = profile.get("name", domain.capitalize())
 
@@ -266,11 +329,16 @@ class DomainSummarizer:
         reduce_prompt = prompts["reduce"].format(combined=safe_combined)
 
         length_multiplier = params.get("summary_detail", 1.5)  # default reduced for CPU speed
-        reduce_max = min(220, int(80 * length_multiplier))
-        reduce_min = min(40, int(20 * length_multiplier))
+        reduce_max = min(300, int(120 * length_multiplier))
+        reduce_min = min(60, int(30 * length_multiplier))
 
         short_summary = self._infer(reduce_prompt, max_new_tokens=reduce_max, min_length=reduce_min)
 
+        # Then in summarize(), after getting short_summary:
+        if short_summary and self._is_looping(short_summary):
+            logger.warning("[Summarizer] Loop detected in reduce output — using bullet fallback.")
+            short_summary = intermediate[0] if intermediate else None
+        
         # IMPROVEMENT 12: Graceful fallback — if reduce fails, use the
         # first intermediate bullet as the short summary instead of crashing.
         if not short_summary:
@@ -303,7 +371,17 @@ class DomainSummarizer:
     # ─────────────────────────────────────────
     # Helpers
     # ─────────────────────────────────────────
-
+    def _is_looping(self, text: str) -> bool:
+        """
+            Detects if flan-t5 is repeating itself.
+            Splits into sentences and checks if any sentence
+            appears more than twice.
+        """
+        sentences = [s.strip().lower() for s in text.split('.') if len(s.strip()) > 10]
+        if not sentences:
+            return False
+        return len(sentences) != len(set(sentences))
+    
     def _empty_result(self, domain_label: str) -> Dict[str, Any]:
         return {
             "domain_label": domain_label,
@@ -326,3 +404,47 @@ class DomainSummarizer:
         """
         self._cache.clear()
         logger.info("[Summarizer] Inference cache cleared.")
+
+    def _summarize_resume_direct(
+        self, chunks: List[str], params: Dict[str, Any]
+        ) -> Dict[str, Any]:
+        """
+        For resume domain: skip map-reduce entirely.
+        Concatenate all chunks and summarize in one direct pass.
+        Works much better for short sparse structured documents.
+        """
+        full_text = " ".join(chunks)
+        safe_text = self._truncate_to_tokens(full_text, max_tokens=450)
+
+        prompt = (
+        "You are an HR analyst. Read this resume and write a professional "
+        "2-3 sentence candidate summary covering: name, degree, key skills, "
+        "years of experience, and one standout achievement.\n\n"
+        f"Resume:\n{safe_text}\n\nCandidate Summary:"
+        )
+
+        length_multiplier = params.get("summary_detail", 1.5)
+        max_tokens = min(200, int(100 * length_multiplier))
+
+        result = self._infer(prompt, max_new_tokens=max_tokens, min_length=40)
+
+        if not result or self._is_looping(result):
+            result = safe_text[:300]
+
+        # Build a simple detailed breakdown from chunks directly
+        detailed = "\n\n".join(
+            f"• {c.strip().capitalize()}"
+            for c in chunks if len(c.split()) >= 10
+        )
+
+        return {
+            "domain_label": "Resumes & CV Intelligence",
+            "short_summary": result,
+            "detailed_summary": detailed or "No detailed breakdown available.",
+            "meta": {
+                "chunks_processed": len(chunks),
+                "model": self.model_name,
+                "device": self.device_name,
+                "method": "direct",
+            },
+        }

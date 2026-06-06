@@ -3,6 +3,7 @@ import re
 from typing import List, Dict, Any
 from pypdf import PdfReader
 from fastapi import UploadFile, HTTPException
+from streamlit import text
 
 class DocumentParser:
     """
@@ -23,6 +24,11 @@ class DocumentParser:
     _ARTIFACTS     = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]|[•·●◦▪▸►]')
     # Sentence boundary — ends with . ! ? followed by whitespace or end
     _SENTENCE_END  = re.compile(r'(?<=[.!?])\s+')
+
+    # Add these two patterns at class level alongside existing ones
+    _HTML_TAGS    = re.compile(r'<[^>]+>')
+    _URLS         = re.compile(r'https?://\S+|www\.\S+')
+    _UNDERSCORES  = re.compile(r'_{3,}')  # strips form field blanks
 
     def __init__(self, chunk_size: int = 1000, overlap: int = 150, max_pages: int = 50):
         if overlap >= chunk_size:
@@ -67,11 +73,14 @@ class DocumentParser:
     # ── Clean ────────────────────────────────────────────────────────────────
 
     def _clean_text(self, text: str) -> str:
-        text = self._ARTIFACTS.sub(" ", text)       # strip control chars & bullets
-        text = self._MULTI_NEWLINE.sub(" ", text)   # collapse newlines
-        text = self._MULTI_SPACE.sub(" ", text)     # collapse spaces
+        text = self._ARTIFACTS.sub(" ", text)
+        text = self._HTML_TAGS.sub(" ", text)      # strip HTML tags
+        text = self._URLS.sub(" ", text)           # strip URLs
+        text = self._UNDERSCORES.sub(" ", text)    # strip ____ form fields
+        text = self._MULTI_NEWLINE.sub(" ", text)
+        text = self._MULTI_SPACE.sub(" ", text)
         return text.strip()
-
+    
     # ── Chunk ────────────────────────────────────────────────────────────────
 
     def create_chunks(self, pages_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
