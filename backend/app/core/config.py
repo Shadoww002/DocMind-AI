@@ -34,7 +34,7 @@ class DomainConfig:
         "medical": {
             "name":      "Medical Records & Clinical Reports",
             "ner_model": os.getenv("MEDICAL_NER_MODEL", "dslim/bert-base-NER"),
-            "llm_model": os.getenv("MEDICAL_LLM_MODEL", "google/flan-t5-base"),
+            "llm_model": os.getenv("MEDICAL_LLM_MODEL", "sshleifer/distilbart-cnn-12-6"),
 
             # IMPROVEMENT: fields updated to match improved extractor output keys
             "fields": [
@@ -64,7 +64,7 @@ class DomainConfig:
         "legal": {
             "name":      "Indian Legal Documents & Contracts",
             "ner_model": os.getenv("LEGAL_NER_MODEL", "dslim/bert-base-NER"),
-            "llm_model": os.getenv("LEGAL_LLM_MODEL", "google/flan-t5-base"),
+            "llm_model": os.getenv("LEGAL_LLM_MODEL", "sshleifer/distilbart-cnn-12-6"),
 
             # IMPROVEMENT: added Monetary Amounts, Applicable Indian Laws, Courts & Jurisdiction
             # to match the three new fields added in the improved extractor
@@ -98,7 +98,7 @@ class DomainConfig:
         "resume": {
             "name":      "Resumes & CV Intelligence",
             "ner_model": os.getenv("RESUME_NER_MODEL", "dslim/bert-base-NER"),
-            "llm_model": os.getenv("RESUME_LLM_MODEL", "google/flan-t5-base"),
+            "llm_model": os.getenv("RESUME_LLM_MODEL", "sshleifer/distilbart-cnn-12-6"),
 
             # IMPROVEMENT: added Education field to match extractor; reordered for UI display
             "fields": [

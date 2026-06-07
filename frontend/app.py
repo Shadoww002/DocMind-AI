@@ -302,9 +302,11 @@ elif st.session_state.app_state == "dashboard":
         device  = meta.get("device", "—")
         model   = meta.get("model", "—").split("/")[-1]
         chunks  = meta.get("chunks_processed", "—")
+        method  = meta.get("method", "—")
         st.markdown(
             f"<div class='meta-bar'>"
             f"<span><strong>Model:</strong> {model}</span>"
+            f"<span><strong>Method:</strong> {method}</span>"
             f"<span><strong>Device:</strong> {device}</span>"
             f"<span><strong>Chunks:</strong> {chunks}</span>"
             f"<span><strong>Time:</strong> {elapsed}s</span>"
@@ -323,14 +325,51 @@ elif st.session_state.app_state == "dashboard":
 
     with tab_summary:
         st.markdown("<div style='margin-top:1.5rem'></div>", unsafe_allow_html=True)
-        st.markdown("##### Brief Insight")
-        st.markdown(f"<div class='short-summary-box'>{payload.get('short_summary','—')}</div>", unsafe_allow_html=True)
-        st.markdown("##### Detailed Breakdown")
+        # ── Brief Insight ────────────────────────────────────────────────────
+        st.markdown("##### ⚡ Brief Insight")
+        short = payload.get("short_summary", "")
+        if short and short != "Insufficient content to generate a summary.":
+            # Sentence-split for better readability — each sentence on its own line
+            import re as _re
+            sentences = [s.strip() for s in _re.split(r'(?<=[.!?])\s+', short) if s.strip()]
+            if len(sentences) > 1:
+                short_html = " ".join(
+                    f"<span style='display:block;margin-bottom:6px'>{s}</span>"
+                    for s in sentences
+                )
+            else:
+                short_html = short
+            st.markdown(f"<div class='short-summary-box'>{short_html}</div>", unsafe_allow_html=True)
+        else:
+            st.markdown(
+                "<div class='short-summary-box' style='color:#6b7280;font-style:italic'>"
+                "Summary could not be generated from this document. "
+                "Try uploading a longer or more text-rich PDF.</div>",
+                unsafe_allow_html=True
+            )
+
+        # ── Detailed Breakdown ───────────────────────────────────────────────
+        st.markdown("##### 📋 Detailed Breakdown")
         detailed = payload.get("detailed_summary", "")
-        formatted = detailed.replace("• ", "<li>").replace("\n\n", "</li>")
-        if "<li>" in formatted:
-            formatted = f"<ul style='padding-left:1.2rem;line-height:1.9'>{formatted}</li></ul>"
-        st.markdown(f"<div class='long-summary-box'>{formatted}</div>", unsafe_allow_html=True)
+        if detailed and "No substantial text" not in detailed:
+            # Each bullet on its own clean list item
+            bullets = [b.strip() for b in detailed.split("\n\n") if b.strip()]
+            items_html = ""
+            for b in bullets:
+                text_b = b.lstrip("•").strip()
+                if text_b:
+                    items_html += f"<li style='margin-bottom:10px;line-height:1.7'>{text_b}</li>"
+            if items_html:
+                formatted = f"<ul style='padding-left:1.2rem;list-style:disc'>{items_html}</ul>"
+            else:
+                formatted = detailed
+            st.markdown(f"<div class='long-summary-box'>{formatted}</div>", unsafe_allow_html=True)
+        else:
+            st.markdown(
+                "<div class='long-summary-box' style='color:#6b7280;font-style:italic'>"
+                "No detailed breakdown available for this document.</div>",
+                unsafe_allow_html=True
+            )
 
     with tab_analytics:
         st.markdown("<div style='margin-top:1.5rem'></div>", unsafe_allow_html=True)
@@ -349,21 +388,38 @@ elif st.session_state.app_state == "dashboard":
         if not extracted_fields:
             st.info("No fields extracted.")
         else:
+            # Domain-specific highlight fields
+            HIGHLIGHT_MAP = {
+                "medical": {
+                    "alert":   ("Diagnoses & Conditions", "Medications & Dosages", "Lab Values & Vitals"),
+                    "warning": ("Medical History", "Procedures & Treatments"),
+                },
+                "legal": {
+                    "alert":   ("Risks & Red Flags", "Monetary Amounts"),
+                    "warning": ("Financial Liabilities", "Indemnity & Clauses", "Applicable Indian Laws"),
+                },
+                "resume": {
+                    "alert":   ("Skills Matrix", "Target Role Alignment"),
+                    "warning": ("Education", "Certifications"),
+                },
+            }
+            domain_highlights = HIGHLIGHT_MAP.get(domain, {})
+            alert_fields   = domain_highlights.get("alert", ())
+            warning_fields = domain_highlights.get("warning", ())
+
             col_l, col_r = st.columns(2, gap="large")
-            for idx, (field, content) in enumerate(extracted_fields.items()):
+            for idx, (field, field_content) in enumerate(extracted_fields.items()):
                 target_col = col_l if idx % 2 == 0 else col_r
                 with target_col:
                     style = "domain-card"
-                    if domain == "medical" and field in ("Diagnoses & Conditions", "Medications & Dosages", "Lab Values & Vitals"):
-                        style += " medical-alert"
-                    elif domain == "legal" and field in ("Risks & Red Flags", "Financial Liabilities", "Monetary Amounts"):
+                    if field in alert_fields:
+                        style += " medical-alert" if domain == "medical" else (
+                            " legal-warning" if domain == "legal" else " resume-success"
+                        )
+                    elif field in warning_fields:
                         style += " legal-warning"
-                    elif domain == "resume" and field in ("Target Role Alignment", "Skills Matrix"):
-                        style += " resume-success"
 
-                    # ── CHANGE 1: use render_field for chip rendering ─────────
-                    body_html = render_field(content)
-                    # ─────────────────────────────────────────────────────────
+                    body_html = render_field(field_content)
 
                     st.markdown(
                         f"<div class='{style}'>"
