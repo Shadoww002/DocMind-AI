@@ -34,7 +34,7 @@ class DomainConfig:
         "medical": {
             "name":      "Medical Records & Clinical Reports",
             "ner_model": os.getenv("MEDICAL_NER_MODEL", "dslim/bert-base-NER"),
-            "llm_model": os.getenv("MEDICAL_LLM_MODEL", "google/flan-t5-base"),
+            "llm_model": os.getenv("MEDICAL_LLM_MODEL", "sshleifer/distilbart-cnn-12-6"),
 
             # IMPROVEMENT: fields updated to match improved extractor output keys
             "fields": [
@@ -50,7 +50,7 @@ class DomainConfig:
             # Smaller chunks for dense clinical text — vitals/lab lines are short
             "chunk_size":      800,
             "chunk_overlap":   150,
-            "max_chunks":      20,
+            "max_chunks":      12,
             "top_k_retrieval": 3,
 
             "system_prompt": (
@@ -64,7 +64,7 @@ class DomainConfig:
         "legal": {
             "name":      "Indian Legal Documents & Contracts",
             "ner_model": os.getenv("LEGAL_NER_MODEL", "dslim/bert-base-NER"),
-            "llm_model": os.getenv("LEGAL_LLM_MODEL", "google/flan-t5-base"),
+            "llm_model": os.getenv("LEGAL_LLM_MODEL", "sshleifer/distilbart-cnn-12-6"),
 
             # IMPROVEMENT: added Monetary Amounts, Applicable Indian Laws, Courts & Jurisdiction
             # to match the three new fields added in the improved extractor
@@ -83,7 +83,7 @@ class DomainConfig:
             # High overlap to prevent legal clauses from being split across chunk boundaries
             "chunk_size":      600,
             "chunk_overlap":   200,
-            "max_chunks":      25,
+            "max_chunks":      15,
             "top_k_retrieval": 4,
 
             "system_prompt": (
@@ -114,7 +114,7 @@ class DomainConfig:
             # Larger chunks to keep complete job entries together
             "chunk_size":      1200,
             "chunk_overlap":   100,
-            "max_chunks":      15,
+            "max_chunks":      8,
             "top_k_retrieval": 2,
 
             "system_prompt": (
