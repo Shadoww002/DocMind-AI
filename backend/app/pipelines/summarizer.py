@@ -10,73 +10,17 @@ logger = logging.getLogger(__name__)
 
 # ── Model ─────────────────────────────────────────────────────────────────────
 # sshleifer/distilbart-cnn-12-6 (~306MB)
-# Distilled BART trained on CNN/DailyMail — produces coherent readable prose.
-# Used for both map (detailed bullets) and reduce (executive summary).
+# Distilled BART trained on CNN/DailyMail news summarization.
+# CRITICAL: distilbart is NOT an instruction-following model.
+# Do NOT pass instruction prompts — it summarizes them as text.
+# Feed ONLY clean raw text and it produces coherent prose summaries.
 DEFAULT_MODEL = "sshleifer/distilbart-cnn-12-6"
 
-# ── Domain prompts ────────────────────────────────────────────────────────────
-# Map prompts: structured extraction per chunk → clean bullet points
-# Reduce prompts: synthesise bullets → readable prose summary
-# Template-filling works better than free-form for distilbart.
-
-MAP_PROMPTS = {
-    "medical": (
-        "Extract key medical facts from this clinical text. "
-        "Include: patient details, diagnoses, medications with dosages, "
-        "lab values, vital signs, procedures, and doctor's plan.\n\n"
-        "{chunk}"
-    ),
-    "legal": (
-        "Extract key legal facts from this Indian legal document. "
-        "Include: parties involved, type of agreement, monetary amounts, "
-        "key clauses, obligations, duration, and applicable Indian laws.\n\n"
-        "{chunk}"
-    ),
-    "resume": (
-        "Extract key professional facts from this resume. "
-        "Include: candidate name, degree and institution, technical skills, "
-        "job titles, companies, years of experience, and achievements.\n\n"
-        "{chunk}"
-    ),
-    "_default": (
-        "Extract the most important facts and key points from this text.\n\n"
-        "{chunk}"
-    ),
-}
-
-REDUCE_PROMPTS = {
-    "medical": (
-        "Write a clear clinical summary for a doctor covering the patient's "
-        "condition, diagnoses, current medications, key lab results, and "
-        "follow-up plan. Use plain professional language.\n\n"
-        "{combined}"
-    ),
-    "legal": (
-        "Write a clear legal summary covering the parties involved, type of "
-        "agreement, key financial terms, main obligations, duration, and any "
-        "risk clauses. Use plain professional language.\n\n"
-        "{combined}"
-    ),
-    "resume": (
-        "Write a professional candidate summary covering the person's name, "
-        "educational background, core technical skills, work experience, and "
-        "standout achievement. Write as a recruiter would describe this candidate.\n\n"
-        "{combined}"
-    ),
-    "_default": (
-        "Write a clear concise summary of the following key points in 2-3 sentences.\n\n"
-        "{combined}"
-    ),
-}
-
-# Prompt echo prefixes that distilbart sometimes repeats — strip these
+# Echo prefixes distilbart sometimes starts output with — strip these
 ECHO_PREFIXES = [
-    "extract key medical facts", "extract key legal facts",
-    "extract key professional facts", "extract the most important",
-    "write a clear clinical summary", "write a clear legal summary",
-    "write a professional candidate summary", "write a clear concise summary",
-    "key medical facts:", "key legal facts:", "key professional facts:",
-    "clinical summary:", "legal summary:", "candidate summary:", "summary:",
+    "this article", "this document", "this report", "this resume",
+    "the following", "in this article", "the article", "the document",
+    "according to", "in summary", "summary:",
 ]
 
 
@@ -84,11 +28,15 @@ class DomainSummarizer:
     """
     Domain-aware summarizer using sshleifer/distilbart-cnn-12-6.
 
+    Key design principle: distilbart is a news summarizer, NOT an instruction
+    model. Feed it clean raw text only — no prompts, no instructions.
+    It will produce coherent extractive-abstractive summaries natively.
+
     Strategy:
-    - Resume + short legal (<5 chunks): direct single-pass summarization
-    - Medical + long legal:             map-reduce pipeline
-    Map phase  → distilbart extracts structured bullet points per chunk
-    Reduce phase → distilbart synthesises bullets into readable prose
+    - Resume + short legal (<5 chunks): direct single-pass on full text
+    - Medical + long legal:             map-reduce
+      MAP:    distilbart summarizes each chunk independently → bullet points
+      REDUCE: distilbart summarizes the combined bullets → short executive summary
     """
 
     def __init__(self, model_name: str = DEFAULT_MODEL):
@@ -113,7 +61,6 @@ class DomainSummarizer:
             self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
             dtype = torch.float16 if self.device_name in ("cuda", "mps") else torch.float32
 
-            # distilbart uses "summarization" task
             if any(x in self.model_name.lower() for x in ["bart", "pegasus", "distilbart"]):
                 self.task = "summarization"
             else:
@@ -135,7 +82,15 @@ class DomainSummarizer:
     # ── Inference ─────────────────────────────────────────────────────────────
 
     def _infer(self, text: str, max_length: int = 180, min_length: int = 30) -> Optional[str]:
-        """Runs distilbart inference with SHA256 cache."""
+        """
+        Runs distilbart on raw text. No prompt prefix — just clean text.
+        SHA256 cache to avoid re-running on duplicate chunks.
+        """
+        # Clean the text before inference
+        text = text.strip()
+        if not text:
+            return None
+
         key = self._cache_key(text)
         if key in self._cache:
             logger.debug("[Summarizer] Cache hit.")
@@ -179,10 +134,10 @@ class DomainSummarizer:
         max_chunks: int = None,
     ) -> Dict[str, Any]:
         """
-        Routes to correct strategy based on domain and chunk count.
-        resume          → direct single-pass
-        legal < 5 chunks → direct single-pass
-        medical + long legal → map-reduce
+        Routes to correct strategy:
+          resume          → direct single-pass
+          legal < 5 chunks → direct single-pass
+          medical + long legal → map-reduce
         """
         start  = time.time()
         params = params or {}
@@ -216,16 +171,13 @@ class DomainSummarizer:
 
         logger.info(f"[Summarizer] Map-reduce | {len(valid_chunks)} chunks | domain={domain}")
 
-        map_prompt_template = MAP_PROMPTS.get(domain, MAP_PROMPTS["_default"])
-
-        # MAP phase — extract structured points per chunk
+        # MAP — distilbart summarizes each chunk independently (NO PROMPT)
         intermediate: List[str] = []
         for i, chunk in enumerate(valid_chunks):
             safe = self._truncate_to_tokens(chunk, max_tokens=350)
-            prompt = map_prompt_template.format(chunk=safe)
             word_count = len(safe.split())
-            map_max = min(160, max(60, word_count // 3))
-            result = self._infer(prompt, max_length=map_max, min_length=20)
+            map_max = min(160, max(50, word_count // 3))
+            result = self._infer(safe, max_length=map_max, min_length=15)
             if result and len(result.split()) >= 5:
                 intermediate.append(result)
             else:
@@ -234,23 +186,20 @@ class DomainSummarizer:
         if not intermediate:
             return self._empty_result(domain_label)
 
-        # Detailed breakdown — clean readable bullets
         detailed = self._format_detailed(intermediate)
 
-        # REDUCE phase — synthesise into readable prose
+        # REDUCE — summarize the combined bullets (NO PROMPT)
         combined      = " ".join(intermediate[:5])
         safe_combined = self._truncate_to_tokens(combined, max_tokens=400)
-        reduce_tmpl   = REDUCE_PROMPTS.get(domain, REDUCE_PROMPTS["_default"])
-        reduce_prompt = reduce_tmpl.format(combined=safe_combined)
 
         length_multiplier = params.get("summary_detail", 1.5)
-        reduce_max = min(280, int(120 * length_multiplier))
-        reduce_min = min(60,  int(30  * length_multiplier))
+        reduce_max = min(200, int(100 * length_multiplier))
+        reduce_min = min(50,  int(25  * length_multiplier))
 
-        short_summary = self._infer(reduce_prompt, max_length=reduce_max, min_length=reduce_min)
+        short_summary = self._infer(safe_combined, max_length=reduce_max, min_length=reduce_min)
 
         if not short_summary or self._is_looping(short_summary):
-            logger.warning("[Summarizer] Reduce looping/empty — using first bullet.")
+            logger.warning("[Summarizer] Reduce poor output — using first bullet.")
             short_summary = intermediate[0]
 
         self._flush_vram()
@@ -281,38 +230,33 @@ class DomainSummarizer:
     ) -> Dict[str, Any]:
         """
         For resume and short legal.
-        Each chunk gets a bullet via distilbart.
-        All chunks combined into one pass for the short summary.
+        Feeds raw text to distilbart — no instruction prefix.
+        distilbart summarizes naturally; produces readable prose.
         """
         start        = time.time()
         profile      = DomainConfig.DOMAINS.get(domain) or {}
         domain_label = profile.get("name", domain.capitalize())
 
-        map_tmpl = MAP_PROMPTS.get(domain, MAP_PROMPTS["_default"])
-
-        # Per-chunk bullets
+        # Per-chunk detailed bullets (NO PROMPT — pure text)
         intermediate: List[str] = []
         for chunk in chunks:
             if len(chunk.split()) < 10:
                 continue
-            safe = self._truncate_to_tokens(chunk, max_tokens=350)
-            prompt = map_tmpl.format(chunk=safe)
-            result = self._infer(prompt, max_length=130, min_length=20)
+            safe   = self._truncate_to_tokens(chunk, max_tokens=350)
+            result = self._infer(safe, max_length=120, min_length=15)
             if result:
                 intermediate.append(result)
 
         detailed = self._format_detailed(intermediate) if intermediate else f"• {chunks[0][:300]}"
 
-        # Short summary — full text in one reduce pass
-        full_text    = " ".join(chunks)
-        safe_text    = self._truncate_to_tokens(full_text, max_tokens=450)
-        reduce_tmpl  = REDUCE_PROMPTS.get(domain, REDUCE_PROMPTS["_default"])
-        reduce_prompt = reduce_tmpl.format(combined=safe_text)
+        # Short summary — full document in one pass (NO PROMPT)
+        full_text = " ".join(chunks)
+        safe_text = self._truncate_to_tokens(full_text, max_tokens=450)
 
         length_multiplier = params.get("summary_detail", 1.5)
-        max_len = min(250, int(110 * length_multiplier))
+        max_len = min(200, int(100 * length_multiplier))
 
-        short_summary = self._infer(reduce_prompt, max_length=max_len, min_length=40)
+        short_summary = self._infer(safe_text, max_length=max_len, min_length=40)
 
         if not short_summary or self._is_looping(short_summary):
             short_summary = intermediate[0] if intermediate else safe_text[:300]
@@ -333,13 +277,10 @@ class DomainSummarizer:
             },
         }
 
-    # ── Formatting ────────────────────────────────────────────────────────────
+    # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _format_detailed(self, items: List[str]) -> str:
-        """
-        Formats intermediate summaries as clean readable bullet points.
-        Strips echo prefixes, capitalises, removes duplicates.
-        """
+        """Clean readable bullet list — deduped, capitalised, echo-stripped."""
         seen   = set()
         result = []
         for item in items:
@@ -350,12 +291,9 @@ class DomainSummarizer:
             if key in seen:
                 continue
             seen.add(key)
-            # Ensure first letter is capitalised
-            clean = clean[0].upper() + clean[1:] if clean else clean
+            clean = clean[0].upper() + clean[1:]
             result.append(f"• {clean}")
         return "\n\n".join(result) if result else "• No detailed breakdown available."
-
-    # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _cache_key(self, text: str) -> str:
         return hashlib.sha256(text.encode()).hexdigest()
@@ -371,11 +309,11 @@ class DomainSummarizer:
         return len(sentences) != len(set(sentences))
 
     def _strip_echo(self, text: str) -> str:
-        """Strips prompt echo prefixes distilbart sometimes repeats."""
+        """Strips common echo prefixes distilbart starts output with."""
         lower = text.lower()
         for echo in ECHO_PREFIXES:
             if lower.startswith(echo):
-                text = text[len(echo):].lstrip(": ").strip()
+                text = text[len(echo):].lstrip(":., ").strip()
                 break
         return text[0].upper() + text[1:] if text else text
 
