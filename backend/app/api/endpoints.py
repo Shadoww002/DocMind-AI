@@ -173,6 +173,12 @@ async def query_document(request: QueryRequest):
             context,
             request.domain,
         )
+
+        # Surface expanded query to frontend when query expansion was applied
+        expanded = _rag_engine._expand_query(request.question, request.domain)
+        if expanded and expanded.lower() != request.question.lower():
+            answer["expanded_query"] = expanded
+
         return answer
 
     except Exception as e:
