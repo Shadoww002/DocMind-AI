@@ -431,11 +431,49 @@ elif st.session_state.app_state == "dashboard":
 
     with tab_rag:
         st.markdown("<div style='margin-top:1.5rem'></div>", unsafe_allow_html=True)
-        st.caption("Questions answered strictly from the document's vector index.")
-        chat_frame = st.container(height=460, border=True)
+        # Domain-specific example questions shown to guide users
+        EXAMPLE_QUESTIONS = {
+            "medical": [
+                "What is the patient's diagnosis?",
+                "What medications are prescribed?",
+                "What are the lab results?",
+                "Who is the attending physician?",
+            ],
+            "legal": [
+                "Who are the parties to this agreement?",
+                "What is the monthly rent amount?",
+                "What are the termination conditions?",
+                "Which Indian laws apply to this document?",
+            ],
+            "resume": [
+                "What degree does the candidate hold?",
+                "What are the candidate's technical skills?",
+                "Which companies has the candidate worked at?",
+                "What certifications does the candidate have?",
+            ],
+        }
+        examples = EXAMPLE_QUESTIONS.get(domain, [])
+        if examples:
+            example_html = " &nbsp;·&nbsp; ".join(
+                f"<span style='cursor:pointer;color:#38bdf8'>{e}</span>"
+                for e in examples
+            )
+            st.markdown(
+                f"<div style='font-size:12px;color:#4b5563;margin-bottom:8px'>"
+                f"💡 Try asking: {example_html}</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.caption("Questions answered strictly from the document's vector index.")
+
+        chat_frame = st.container(height=440, border=True)
         with chat_frame:
             if not st.session_state.chat_log:
-                st.markdown("<p style='text-align:center;color:#4b5563;margin-top:140px;'>Vector index ready — ask below.</p>", unsafe_allow_html=True)
+                st.markdown(
+                    "<p style='text-align:center;color:#4b5563;margin-top:120px;'>"
+                    "Vector index ready — ask a specific question below.</p>",
+                    unsafe_allow_html=True,
+                )
             else:
                 for entry in st.session_state.chat_log:
                     with st.chat_message(entry["role"]):
@@ -460,11 +498,14 @@ elif st.session_state.app_state == "dashboard":
                                 timeout=120,
                             )
                             if resp.status_code == 200:
-                                ans         = resp.json()
-                                answer_text = ans.get("answer", "No answer returned.")
-                                citations   = ans.get("citations", [])
-                                confidence  = ans.get("confidence", 0.0)
+                                ans            = resp.json()
+                                answer_text    = ans.get("answer", "No answer returned.")
+                                citations      = ans.get("citations", [])
+                                confidence     = ans.get("confidence", 0.0)
+                                expanded_query = ans.get("expanded_query", None)
                                 st.markdown(answer_text)
+                                if expanded_query:
+                                    st.caption(f"🔍 Interpreted as: '{expanded_query}'")
                                 if confidence:
                                     st.caption(f"Confidence: {int(confidence * 100)}%")
                                 for cite in citations:

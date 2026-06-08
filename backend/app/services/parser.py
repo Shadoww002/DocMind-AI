@@ -107,6 +107,7 @@ class DocumentParser:
             sentences  = self._SENTENCE_END.split(text)
             window: List[str] = []
             window_len = 0
+            
 
             for sent in sentences:
                 sent_len = len(sent)
