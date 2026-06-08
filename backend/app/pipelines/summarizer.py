@@ -331,6 +331,7 @@ class DomainSummarizer:
         elif torch.backends.mps.is_available():
             torch.mps.empty_cache()
 
+
     def clear_result_cache(self):
         self._cache.clear()
         logger.info("[Summarizer] Cache cleared.")
