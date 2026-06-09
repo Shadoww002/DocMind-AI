@@ -14,9 +14,11 @@
 
 ---
 
-<!-- DEMO PLACEHOLDER -->
-> 📽️ **Demo GIF** — replace this line with your screen recording
-> `![DocMind AI Demo](assets/demo.gif)`
+
+
+https://github.com/user-attachments/assets/3f0f33a7-12a9-4000-85bc-dd9face29b4b
+
+
 
 ---
 
