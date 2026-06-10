@@ -26,7 +26,6 @@ ENV/
 
 # ── Environment variables — NEVER commit real secrets ─────────────────────────
 .env
-# .env.example is safe to commit — it has no real values
 
 # ── ChromaDB persistent storage ───────────────────────────────────────────────
 data/
@@ -39,7 +38,7 @@ data/chroma_db/
 models/
 
 # ── Streamlit ─────────────────────────────────────────────────────────────────
-.streamlit/secrets.toml        # if you ever add Streamlit secrets
+.streamlit/secrets.toml 
 
 # ── pytest ────────────────────────────────────────────────────────────────────
 .pytest_cache/
