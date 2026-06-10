@@ -29,14 +29,11 @@ ENV/
 # .env.example is safe to commit — it has no real values
 
 # ── ChromaDB persistent storage ───────────────────────────────────────────────
-# This folder grows with every document you process.
-# It is local state, not source code.
 data/
 data/chroma_db/
 
 # ── HuggingFace model cache ───────────────────────────────────────────────────
-# Models are downloaded automatically on first run.
-# Never commit them — they are 90MB–750MB each.
+
 .cache/
 ~/.cache/huggingface/
 models/
@@ -63,7 +60,6 @@ Thumbs.db
 logs/
 
 # ── Uploaded test PDFs ────────────────────────────────────────────────────────
-# Don't accidentally commit patient records or legal documents
 *.pdf
 uploads/
 test_docs/
